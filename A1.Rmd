@@ -12,7 +12,8 @@ knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(warning = F, message = F)
 ```
 
-# First read files from electricity consumption.
+# For Electrical
+Read files from electricity consumption.
 ```{r read elec}
 library(tidyverse)
 
@@ -51,7 +52,7 @@ for(year in years){
 }
 ```
 
-# Then categorize the elec data into commercial(com) and residential(res), since we'll be needing those for the graph.Though might be a bit complicated, perhaps use a loop? Need to ask.
+Categorize the electrical data into commercial(com) and residential(res), since we'll be needing those for the graph.Though might be a bit complicated, perhaps use a loop? Need to ask.
 ```{r categorize elec data}
 pge_elec_com <-
   pge_elec1 %>% 
@@ -73,7 +74,14 @@ pge_elec_com <-
       )
   ) %>% 
   mutate(
-    TOTALKBTU = TOTALKWH*3.412
+    TOTALKBTU = TOTALKWH*3.412,
+    DATE = 
+      paste(
+        YEAR,
+        MONTH, 
+        "01",
+        sep="-"
+      ) %>% as.Date()
   )
 
 pge_elec_res <-
@@ -96,11 +104,19 @@ pge_elec_res <-
       )
   ) %>% 
   mutate(
-    TOTALKBTU = TOTALKWH*3.412
+    TOTALKBTU = TOTALKWH*3.412,
+    DATE = 
+      paste(
+        YEAR,
+        MONTH, 
+        "01",
+        sep="-"
+      ) %>% as.Date()
   )
 ```
 
-# Read file for gas.
+# For Gas
+Read file for gas.
 ```{r reading gas}
 library(tidyverse)
 
@@ -139,7 +155,7 @@ for(year in years){
 }
 ```
 
-
+For the following chunk, I assume it should be same as the electrical above, probably need a loop, but not sure how. Need further improvement.
 ```{r catergorizing gas data}
 pge_gas_com <-
   pge_gas1 %>% 
@@ -161,7 +177,14 @@ pge_gas_com <-
       )
   ) %>% 
   mutate(
-    TOTALKBTU = TOTALTHM*100
+    TOTALKBTU = TOTALTHM*100,
+    DATE = 
+      paste(
+        YEAR,
+        MONTH, 
+        "01",
+        sep="-"
+      ) %>% as.Date()
   )
 
 pge_gas_res <-
@@ -184,10 +207,18 @@ pge_gas_res <-
       )
   ) %>% 
   mutate(
-    TOTALKBTU = TOTALTHM*100
+    TOTALKBTU = TOTALTHM*100,
+    DATE = 
+      paste(
+        YEAR,
+        MONTH, 
+        "01",
+        sep="-"
+      ) %>% as.Date()
   )
 ```
 
+Bind gas and elec data together and create the datasets "monthly commercial gas and electricity usage" and "monthly residential gas and electricity usage"
 ```{r bind together}
 pge_com_final <- rbind(pge_gas_com, pge_elec_com)
 pge_res_final <- rbind(pge_gas_res, pge_elec_res)
@@ -196,8 +227,8 @@ saveRDS(pge_com_final, "pge_com_final.rds")
 saveRDS(pge_res_final, "pge_res_final.rds")
 ```
 
-# Now plot graph for com.
-```{r plot}
+# Plot graph for commercial.
+```{r plot com}
 library(tidyverse)
 library(plotly)
 
@@ -206,7 +237,7 @@ pge_chart_com <-
   ggplot() +
   geom_bar(
     aes(
-      x = MONTH %>% factor(),
+      x = DATE,
       y = TOTALKBTU,
       fill = CUSTOMERCLASS
     ),
@@ -216,8 +247,42 @@ pge_chart_com <-
   labs(
     x = "Month",
     y = "KBTU",
-    title = "PG&E Territory Monthly Commercial Gas Electricity Usage, 2017-2021Q2",
+    title = "PG&E Territory Monthly Commercial Gas & Electricity Usage, 2017-2021Q2",
     fill = "Usage Type"
   )
+pge_chart_com
 ```
+
+# Plot graph for residential.
+```{r plot res}
+library(tidyverse)
+library(plotly)
+
+pge_chart_res <-
+  pge_res_final %>% 
+  ggplot() +
+  geom_bar(
+    aes(
+      x = DATE,
+      y = TOTALKBTU,
+      fill = CUSTOMERCLASS
+    ),
+    stat = "identity",
+    position = "stack"
+  ) +
+  labs(
+    x = "Month",
+    y = "KBTU",
+    title = "PG&E Territory Monthly Residential Gas & Electricity Usage, 2017-2021Q2",
+    fill = "Usage Type"
+  )
+pge_chart_res
+```
+
+# Reflections
+For commercial monthly gas and electricity usage, we can see an all-time low at April, 2020, just when the pandemic was starting to fully spread across the country. It then slowly begins to climb up, as companies an stores adjusted to this new norm and reopened.
+
+For residential monthly gas and electricity usage, we can see that the trend has not very much altered from 2017 to 2021, with the winter months having highest total usage that mostly contributed to a surge in gas.
+
+
 
