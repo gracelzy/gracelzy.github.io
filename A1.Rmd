@@ -1,28 +1,223 @@
 ---
-title: "A1"
+title: "GraceLi_A1"
+author: "Grace Li"
+date: "09/27/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = F, message = F)
 ```
 
-## R Markdown
+# First read files from electricity consumption.
+```{r read elec}
+library(tidyverse)
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+years <- 2017:2021
+quarters <- 1:4
+type <- "Electric"
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+pge_elec1 <- NULL
 
-```{r cars}
-summary(cars)
+for(year in years){
+  for(quarter in quarters) {
+    if(year==2021){
+      quarter <- 1:2
+    }
+    else{
+      quarter <- 1:4
+    }
+    filename <- 
+      paste0(
+        "pge/PGE_",
+        year,
+        "_Q",
+        quarter,
+        "_",          
+        type,
+        "UsageByZip.csv"
+      )      
+    print(filename)      
+    
+    temp_e<- read_csv(filename)
+    
+    pge_elec1 <- rbind(pge_elec1,temp_e)
+  
+    saveRDS(pge_elec1, "pge_elec1.rds")
+  } 
+}
 ```
 
-## Including Plots
+# Then categorize the elec data into commercial(com) and residential(res), since we'll be needing those for the graph.Though might be a bit complicated, perhaps use a loop? Need to ask.
+```{r categorize elec data}
+pge_elec_com <-
+  pge_elec1 %>% 
+  filter(
+    CUSTOMERCLASS %in% 
+      c(
+        "Elec- Commercial"
+      )
+  ) %>% 
+  select(
+    -c(COMBINED, AVERAGEKWH)
+  ) %>% 
+  group_by(YEAR, MONTH, CUSTOMERCLASS) %>% 
+  summarize(
+    TOTALKWH = 
+      sum(
+        TOTALKWH, 
+        na.rm = T
+      )
+  ) %>% 
+  mutate(
+    TOTALKBTU = TOTALKWH*3.412
+  )
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+pge_elec_res <-
+  pge_elec1 %>% 
+  filter(
+    CUSTOMERCLASS %in% 
+      c(
+        "Elec- Residential"
+      )
+  ) %>% 
+  select(
+    -c(COMBINED, AVERAGEKWH)
+  ) %>% 
+  group_by(YEAR, MONTH, CUSTOMERCLASS) %>% 
+  summarize(
+    TOTALKWH = 
+      sum(
+        TOTALKWH, 
+        na.rm = T
+      )
+  ) %>% 
+  mutate(
+    TOTALKBTU = TOTALKWH*3.412
+  )
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# Read file for gas.
+```{r reading gas}
+library(tidyverse)
+
+years <- 2017:2021
+quarters <- 1:4
+type <- "Gas"
+
+pge_gas1 <- NULL
+
+for(year in years){
+  for(quarter in quarters) {
+    if(year==2021){
+      quarter <- 1:2
+    }
+    else{
+      quarter <- 1:4
+    }
+    filename <- 
+      paste0(
+        "pge/PGE_",
+        year,
+        "_Q",
+        quarter,
+        "_",          
+        type,
+        "UsageByZip.csv"
+      )
+    print(filename)      
+    
+    temp_g<- read_csv(filename)
+      
+    pge_gas1 <- rbind(pge_gas1, temp_g)
+
+    saveRDS(pge_gas1, "pge_gas1.rds")
+  }
+}
+```
+
+
+```{r catergorizing gas data}
+pge_gas_com <-
+  pge_gas1 %>% 
+  filter(
+    CUSTOMERCLASS %in% 
+      c(
+        "Gas- Commercial"
+      )
+  ) %>% 
+  select(
+    -c(COMBINED, AVERAGETHM)
+  ) %>% 
+  group_by(YEAR, MONTH, CUSTOMERCLASS) %>% 
+  summarize(
+    TOTALTHM = 
+      sum(
+        TOTALTHM, 
+        na.rm = T
+      )
+  ) %>% 
+  mutate(
+    TOTALKBTU = TOTALTHM*100
+  )
+
+pge_gas_res <-
+  pge_gas1 %>% 
+  filter(
+    CUSTOMERCLASS %in% 
+      c(
+        "Gas- Residential"
+      )
+  ) %>% 
+  select(
+    -c(COMBINED, AVERAGETHM)
+  ) %>% 
+  group_by(YEAR, MONTH, CUSTOMERCLASS) %>% 
+  summarize(
+    TOTALTHM = 
+      sum(
+        TOTALTHM, 
+        na.rm = T
+      )
+  ) %>% 
+  mutate(
+    TOTALKBTU = TOTALTHM*100
+  )
+```
+
+```{r bind together}
+pge_com_final <- rbind(pge_gas_com, pge_elec_com)
+pge_res_final <- rbind(pge_gas_res, pge_elec_res)
+
+saveRDS(pge_com_final, "pge_com_final.rds")
+saveRDS(pge_res_final, "pge_res_final.rds")
+```
+
+# Now plot graph for com.
+```{r plot}
+library(tidyverse)
+library(plotly)
+
+pge_chart_com <-
+  pge_com_final %>% 
+  ggplot() +
+  geom_bar(
+    aes(
+      x = MONTH %>% factor(),
+      y = TOTALKBTU,
+      fill = CUSTOMERCLASS
+    ),
+    stat = "identity",
+    position = "stack"
+  ) +
+  labs(
+    x = "Month",
+    y = "KBTU",
+    title = "PG&E Territory Monthly Commercial Gas Electricity Usage, 2017-2021Q2",
+    fill = "Usage Type"
+  )
+```
+
