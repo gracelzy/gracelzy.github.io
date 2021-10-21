@@ -1,0 +1,117 @@
+---
+title: "Grace Li_A4"
+author: Grace Li
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+```{r}
+library(tidyverse)
+library(censusapi)
+
+Sys.setenv(CENSUS_KEY="9136d9427440997e3a0e797bbf837fa633066a90")
+
+acs_vars_2019_5yr <-
+  listCensusMetadata(
+    name = "2019/acs/acs5",
+    type = "variables"
+  )
+```
+
+```{r}
+census_race_categories <- 
+  c(
+    "White Alone",
+    "Black or African American",
+    "American Indian and Alaska Native Alone",
+    "Asian Alone",
+    "Native Hawaiian and Other Pacific Islander Alone",
+    "Some Other Race Alone",
+    "Two or More Races"
+  )
+
+bay_edu_race <-
+  1:7 %>% 
+  map_dfr(function(x){
+    getCensus(
+      name = "acs/acs5",
+      vintage = 2019,
+      region = "county:085",
+      regionin = "state:06",
+      vars = paste0("group(C15002",LETTERS[x],")")
+    ) %>%
+      select(!c(GEO_ID,state,NAME) & !ends_with(c("EA","MA","M"))) %>%
+      pivot_longer(
+        ends_with("E"),
+        names_to = "name",
+        values_to = "estimate"
+      ) %>%
+      left_join(
+        acs_vars_2019_5yr %>% 
+          select(name, label)
+      ) %>% 
+      select(-name) %>% 
+      separate(
+        label,
+        into = c(NA,NA,NA,"education"),
+        sep = "!!"
+      ) %>% 
+      filter(!is.na(education)) %>% 
+      mutate(race = census_race_categories[x])
+  })
+```
+
+```{r}
+bay_edu_race_total <-
+  bay_edu_race %>% 
+  group_by(race) %>% 
+  summarize(estimate = sum(estimate)) %>% 
+  mutate(education = "Total")
+
+bay_edu_race %>% 
+  group_by(education, race) %>% 
+  summarize(estimate = sum(estimate)) %>% 
+  rbind(bay_edu_race_total) %>% 
+  ggplot() +
+  geom_bar(
+    aes(
+      x = education %>% factor(levels = rev(c("Total",unique(bay_edu_race$education)))),
+      y = estimate,
+      fill = race %>% factor(levels = rev(unique(bay_edu_race$race)))
+    ),
+    stat = "identity",
+    position = "fill"
+  ) +
+  labs(
+    x = "Educational Attainment",
+    y = "Proportion of population 25 years or older ",
+    title = "Santa Clara County Educational Attainment by Race",
+    fill = "Race"
+  ) +
+  coord_flip() +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "vertical"
+  )  +
+  guides(
+    fill = guide_legend(
+      reverse = T
+    )
+  )
+```
+
+# Reflection
+
+From the graph produced, we can see that educational attainment of the proportion of population 25 years or older in Santa Clara country mostly follows the distribution of the total population. However, the graph shows that educational attainment is still disproportional among race in this particular portion of the population.
+
+For people with less than high school diploma, proportion of "white alone", "Asian alone", "black or African American", and "two or more races" are less than its proportion in the total population. Though nearly invisible, proportion of "American Indian and Alaska native alone" is significantly higher than it is in the total population. So is "some other race alone", with its proportion exceeding more than twice of its proportion in the total population. Meanwhile, "native Hawaiian and other Pacific islander alone" stays roughly the same.
+
+However, for people having a bachelor's degree or higher, proportion of "Asian alone" population way exceeds its proportion in total. Proportion of "white alone", "American Indian and Alaska native alone", "black or African American" and "two more races" are slightly lower than total, but they roughly stay the same. However, for "some other race alone", the proportion drops significantly, while "native Hawaiian and other Pacific islander alone" is alomost invisible in this part of the graph.
+
+
+
