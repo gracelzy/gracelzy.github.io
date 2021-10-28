@@ -1,0 +1,168 @@
+---
+title: "Grace Li_A5"
+author: Grace Li
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+```{r}
+library(tidyverse)
+library(censusapi)
+library(sf)
+library(tigris)
+library(mapview)
+library(leaflet)
+library(readxl)
+
+ces4 <- read_excel("calenviroscreen40resultsdatadictionary_F_2021.xlsx")
+```
+
+```{r}
+bay_county_names <-
+  c(
+    "Alameda",
+    "Contra Costa",
+    "Marin",
+    "Napa",
+    "San Francisco",
+    "San Mateo",
+    "Santa Clara",
+    "Solano",
+    "Sonoma"
+  )
+
+ca_tracts <- tracts("CA", cb = T, progress_bar = F)
+
+ces4_bay_pm25 <-
+  ces4 %>% 
+  filter(`California County` %in% bay_county_names) %>% 
+  select(`Census Tract`, PM2.5) %>% 
+  left_join(
+    ca_tracts %>% 
+      transmute(GEOID = as.numeric(GEOID)), 
+    by = c("Census Tract" = "GEOID")
+  ) %>% 
+  st_as_sf()
+
+ces4_bay_asthma <-
+  ces4 %>% 
+  filter(`California County` %in% bay_county_names) %>% 
+  select(`Census Tract`, Asthma) %>% 
+  left_join(
+    ca_tracts %>% 
+      transmute(GEOID = as.numeric(GEOID)), 
+    by = c("Census Tract" = "GEOID")
+  ) %>% 
+  st_as_sf()
+```
+
+# PM2.5 Map
+```{r}
+pm25_pal <- colorNumeric(
+  palette = "Reds",
+  domain = ces4_bay_pm25$PM2.5
+)
+
+leaflet() %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addPolygons(
+    data = ces4_bay_pm25,
+    fillColor = ~pm25_pal(PM2.5),
+    color = "white",
+    weight = 0.5,
+    fillOpacity = 0.5,
+    label = ~PM2.5
+  )
+```
+
+# Asthma Map
+```{r}
+asthma_pal <- colorNumeric(
+  palette = "Reds",
+  domain = ces4_bay_asthma$Asthma
+)
+
+leaflet() %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addPolygons(
+    data = ces4_bay_asthma,
+    fillColor = ~asthma_pal(Asthma),
+    color = "white",
+    weight = 0.5,
+    fillOpacity = 0.5,
+    label = ~Asthma
+  )
+```
+
+# Brief Comments
+
+In the PM2.5 Map, PM2.5 is measured in "annual mean concentration of PM2.5 (weighted average of measured monitor concentrations and satellite observations, μg/m3), over three years (2015 to 2017)". We can see that the census tracts with higher annual concentration of PM2.5 are areas east of the San Francisco bay and center to east of the entire bay area. Meanwhile, areas at the north and south borders experience less PM2.5 concentration.
+
+In the Asthma Map, asthma is measured in "spatially modeled, age-adjusted rate of ED visits for asthma per 10,000 (averaged over 2015-2017)". We can see that areas to the east of San Francisco bay has higher asthma prevalence, as well as places to the northeast of the entire bay area, such as Vallejo and Antioch.
+
+
+```{r}
+bay_pm25_asthma_tract <-
+  ces4_bay_asthma %>%
+  st_set_geometry(NULL) %>%
+  left_join(
+    ces4_bay_pm25 %>%
+    st_set_geometry(NULL) 
+  )
+```
+
+```{r}
+ggplot(
+  data = bay_pm25_asthma_tract,
+  aes(
+      x = PM2.5,
+      y = Asthma
+    )
+) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+# Best-fit Line
+
+At this stage, the best-fit line is representative of the data set, since the points are mostly distributed along the line, even though there are a few that wandered off.
+
+```{r}
+model <- lm(Asthma ~ PM2.5, bay_pm25_asthma_tract)
+
+summary(model)
+```
+
+# Interpretation of Regression Model
+
+An increase of 1 in PM2.5 is associated with an increase of 19.862 in Asthma. P value here is very close to zero, so we reject null hypothesis and consider this regression statistically significant. 96% of the variation in PM2.5 is explained by the variation in Asthma.
+
+```{r}
+plot(density(residuals(model)))
+```
+
+# Residual Distribution
+
+Residual distribution is significantly skewed to the left.
+
+```{r}
+model <- lm(log(Asthma) ~ PM2.5, bay_pm25_asthma_tract)
+
+summary(model)
+```
+
+```{r}
+plot(density(residuals(model)))
+```
+
+# New Residual Distribution
+
+This time, the mean of residual is very close to zero and this time it yields a more normal distribution . 
+
+
+
