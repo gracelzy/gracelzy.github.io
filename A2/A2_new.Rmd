@@ -1,0 +1,170 @@
+---
+title: "Grace Li_A2"
+author: "Grace Li"
+date: "12/05/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, include = F}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+```{r}
+library(tidyverse)
+library(sf)
+library(mapview)
+library(leaflet)
+library(censusapi)
+library(devtools)
+install_github('walkerke/tigris')
+library(tigris)
+
+Sys.setenv(CENSUS_KEY="9136d9427440997e3a0e797bbf837fa633066a90")
+```
+
+
+```{r decennial data 2020}
+dec_vars_2020 <-
+  listCensusMetadata(
+    name = "2020/dec/pl",
+    type = "variables"
+  )
+
+scc_pop_2020 <-
+  getCensus(
+    name = "dec/pl",
+    vintage = 2020,
+    region = "block:*", 
+    regionin = "state:06+county:085",
+    vars = "P1_001N"
+  ) %>% 
+  transmute(
+    GEOID20 = paste0(state,county,tract,block),
+    pop = P1_001N
+  )
+
+blocks_2020 <- blocks("CA", "Santa Clara", year = 2020, progress_bar = F)
+```
+
+```{r decennial data 2010}
+dec_vars_2010 <-
+  listCensusMetadata(
+    name = "2010/dec/pl",
+    type = "variables"
+  )
+
+scc_pop_2010 <-
+  getCensus(
+    name = "dec/pl",
+    vintage = 2010,
+    region = "block:*", 
+    regionin = "state:06+county:085",
+    vars = "P001001"
+  ) %>% 
+  transmute(
+    GEOID10 = paste0(state,county,tract,block),
+    pop = P001001
+  )
+
+blocks_2010 <- blocks("CA", "Santa Clara", year = 2010, progress_bar = F)
+```
+
+
+```{r mountain view 2010}
+mv_boundary <- places("CA", progress_bar = F) %>% 
+  filter(NAME == "Mountain View")
+
+mv_blocks_2010 <- blocks_2010 %>% 
+  st_centroid() %>% 
+  .[mv_boundary, ] %>% 
+  st_drop_geometry() %>% 
+  left_join(blocks_2010 %>% select(GEOID10)) %>% 
+  st_as_sf() %>% 
+  select(GEOID10) %>% 
+  left_join(scc_pop_2010)
+```
+
+
+```{r mountain view 2020}
+mv_blocks_2020 <- blocks_2020 %>%
+  .[mv_boundary, ] %>% 
+  select(GEOID20) %>% 
+  left_join(scc_pop_2020)
+
+mapview(mv_blocks_2010) + mapview(mv_blocks_2020, alpha.regions = 0, color = "red", lwd = 2)
+```
+
+
+```{r spacial subsetting}
+mv_blocks_2020_intersect <- mv_blocks_2020 %>% 
+  st_transform(26910) %>% 
+  mutate(original_area = st_area(.)) %>% 
+  st_intersection(
+    mv_blocks_2010 %>%
+      select(GEOID10) %>% 
+      st_transform(26910)
+  ) %>% 
+  mutate(
+    leftover_area = st_area(.),
+    perc_area = as.numeric(leftover_area / original_area),
+    pop_2020 = pop * perc_area
+  )
+```
+
+
+```{r}
+mv_blocks_2020_reshaped <- mv_blocks_2020_intersect %>%
+  st_drop_geometry() %>% 
+  group_by(GEOID10) %>% 
+  summarize(
+    pop_2020 = sum(pop_2020, na.rm=T) %>% round()
+  )
+```
+
+```{r}
+projection <- "+proj=longlat +zone=10 +ellps=GRS80  +datum=WGS84 +units=ft +no_defs"
+
+mv_pop_2010_2020 <- mv_blocks_2010 %>%
+  left_join(mv_blocks_2020_reshaped) %>% 
+  mutate(
+    absolute_pop = (pop_2020 - pop) / as.numeric(st_area(.)) * 43560
+  )
+```
+
+
+```{r}
+max <- max(abs(mv_pop_2010_2020$absolute_pop))
+
+absolute_pal <- colorNumeric(
+  palette = "PiYG",
+  domain = c(-max,max)
+)
+```
+
+
+```{r}
+leaflet(mv_pop_2010_2020) %>% 
+  addProviderTiles(provider = providers$CartoDB.Positron) %>% 
+  addPolygons(
+    fillColor = ~absolute_pal(absolute_pop),
+    label = ~round(absolute_pop),
+    color = "white",
+    opacity = 0.5,
+    fillOpacity = 0.75,
+    weight = 1
+  ) %>% 
+  addLegend(
+    pal = absolute_pal,
+    value = c(-max,max),
+    title = "Absolute Change in <br> Population Density <br> in Mountain view <br> 2010-2020"
+  )
+```
+
+# Reflection
+From the graph, we can see that population density changes has mostly occured in the middle part of Mountain view. While the central to western part of the city saw an increased change, decreased density change mostly happened in the southeast, as well as the western most parts of the city. The population density in the north and northeastern part of the Mountain View area is mostly unchanged, which is probably because it is where a large golf course and headquarters of Google and other tech companies are located.
+
+
+
+
