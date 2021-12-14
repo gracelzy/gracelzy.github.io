@@ -1,0 +1,393 @@
+---
+title: "Housing Affordability in the Bay Area"
+author: "Grace Li"
+date: "12/11/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+
+```{r}
+library(tidyverse)
+library(leaflet)
+library(sf)
+library(plotly)
+library(tigris)
+library(tidycensus)
+library(censusapi)
+library(StatMatch)
+
+Sys.setenv(CENSUS_KEY="9136d9427440997e3a0e797bbf837fa633066a90")
+
+acs_vars_2019_1yr <-
+  listCensusMetadata(
+    name = "2019/acs/acs1",
+    type = "variables"
+  )
+
+acs_vars_2019_5yr <-
+  listCensusMetadata(
+    name = "2019/acs/acs5",
+    type = "variables"
+  )
+```
+
+In recent years, the Bay Area economy has experienced record employment levels during a tech expansion surpassing the “dot-com” era of the late 1990s. In addition to bringing vitality and wealth to the region, the boom also brought challenges. Overburdened infrastructure, climate change, disruptive technological innovation, and the changing regional and national economy are just some of the many issues that call for coordinated and concerted regional action. One challenge above all, however, requires immediate attention: housing.
+
+The Bay Area’s housing affordability and neighborhood stability crisis has been decades in the making. Although the housing crisis has many components, its foundation is clear: there simply is not enough housing, whether market-rate or affordable, given the growing number of residents and jobs. With limited supply and strong demand, rents and home prices have risen rapidly. Today the Bay Area may have the most severe housing crisis of any of the nation’s large metro areas and, at this time, there are limited policy tools to help address the problem at a regional level.
+
+According to the United States Department of Housing and Urban Development, a household should spend no more than 30 percent of its income on housing costs - for those exceeding this threshold, they are considered to be cost burdened. In this final project, I will look into these burdened households (both owner and renter households) and explore the reason of low housing affordability in the Bay Area. Data used in this project are from the 2019 ACS five year survey and 2019 PUMS 1 year survey.
+
+
+# Part I
+In this part, I created maps demonstrating cost burdens for households in the bay area. They provide great visual overview as well as close-up examination of disadvantaged communities.
+
+```{r}
+pums_2019_1yr <- getCensus(
+  name = "acs/acs1/pums",
+  vintage = 2019,
+  region = "public use microdata area:*", 
+  regionin = "state:06",
+  vars = c(
+    "SERIALNO",
+    "SPORDER",
+    "PWGTP",
+    "WGTP",
+    "NP",
+    "HINCP",
+    "TEN",
+    "RAC1P",
+    "GRPIP",
+    "OCPIP"
+  )
+)
+```
+
+```{r}
+ca_pumas <-
+  pumas("CA", cb = T, progress_bar = F)
+
+bay_county_names <-
+  c(
+    "Alameda",
+    "Contra Costa",
+    "Marin",
+    "Napa",
+    "San Francisco",
+    "San Mateo",
+    "Santa Clara",
+    "Solano",
+    "Sonoma"
+  )
+
+bay_counties <-
+  counties("CA", cb = T, progress_bar = F) %>%
+  filter(NAME %in% bay_county_names)
+
+bay_pumas <-
+  ca_pumas %>% 
+  st_centroid() %>% 
+  .[bay_counties, ] %>% 
+  st_drop_geometry() %>% 
+  left_join(ca_pumas %>% select(GEOID10)) %>% 
+  st_as_sf()
+
+bay_pums <-
+  pums_2019_1yr %>% 
+  mutate(
+    PUMA = str_pad(public_use_microdata_area,5,"left","0")
+  ) %>% 
+  filter(PUMA %in% bay_pumas$PUMACE10)
+```
+
+```{r}
+bay_pums_burden <-
+  bay_pums %>% 
+  filter(!duplicated(SERIALNO)) %>% 
+  mutate(
+    WGTP = as.numeric(WGTP),
+    burdened_household = ifelse(
+      (GRPIP > 30),
+      WGTP,
+      ifelse(
+        (OCPIP > 30),
+        WGTP,
+        0
+      )
+    )
+  ) %>% 
+  group_by(PUMA) %>% 
+  summarize(
+    burdened_household =
+      sum(burdened_household, na.rm =T)/sum(WGTP, na.rm = T)*100
+  ) %>% 
+  left_join(
+    bay_pumas %>% 
+      select(PUMACE10),
+    by = c("PUMA" = "PUMACE10")
+  ) %>% 
+  st_as_sf()
+```
+
+```{r}
+pums_pal <- colorNumeric(
+  palette = "Oranges",
+  domain = bay_pums_burden$burdened_household
+)
+
+leaflet() %>%
+  addTiles() %>% 
+  addPolygons(
+    data = bay_pums_burden,
+    fillColor = ~pums_pal(burdened_household),
+    color = "white",
+    opacity = 0.5,
+    fillOpacity = 0.5,
+    weight = 1,
+    label = ~paste0(
+      round(burdened_household), 
+      "% burdened households"
+    ),
+    highlightOptions = highlightOptions(
+      weight = 2,
+      opacity = 1
+    )
+  ) %>% 
+  addLegend(
+    data = bay_pums_burden,
+    pal = pums_pal,
+    values = ~burdened_household,
+    title = "% Burdened Households spending <br >more than 30% of household income <br> on monthly selected owner cost <br>/gross rent in the past 12 months, 2019"
+  )
+```
+
+
+```{r}
+bay_pums_burden_minority <-
+  bay_pums %>% 
+  filter(!duplicated(SERIALNO)) %>% 
+  mutate(
+    WGTP = as.numeric(WGTP),
+    nonwhite_burdened_lowinc = ifelse(
+      (RAC1P != 1) &
+        (HINCP < 100000) &
+        (GRPIP > 30),
+      WGTP,
+      ifelse(
+        (RAC1P != 1) &
+          (HINCP < 100000) &
+          (OCPIP > 30),
+        WGTP,
+        0
+      )
+    )
+  ) %>% 
+  group_by(PUMA) %>% 
+  summarize(
+    nonwhite_burdened_lowinc =
+      sum(nonwhite_burdened_lowinc, na.rm =T)/sum(WGTP, na.rm = T)*100
+  ) %>% 
+  left_join(
+    bay_pumas %>% 
+      select(PUMACE10),
+    by = c("PUMA" = "PUMACE10")
+  ) %>% 
+  st_as_sf()
+```
+
+```{r}
+pums_pal <- colorNumeric(
+  palette = "Oranges",
+  domain = bay_pums_burden_minority$nonwhite_burdened_lowinc
+)
+
+leaflet() %>%
+  addTiles() %>% 
+  addPolygons(
+    data = bay_pums_burden_minority,
+    fillColor = ~pums_pal(nonwhite_burdened_lowinc),
+    color = "white",
+    opacity = 0.5,
+    fillOpacity = 0.5,
+    weight = 1,
+    label = ~paste0(
+      round(nonwhite_burdened_lowinc), 
+      "% non-white burdened low income households"
+    ),
+    highlightOptions = highlightOptions(
+      weight = 2,
+      opacity = 1
+    )
+  ) %>% 
+  addLegend(
+    data = bay_pums_burden_minority,
+    pal = pums_pal,
+    values = ~nonwhite_burdened_lowinc,
+    title = "% non-White Burdened Households <br >spending more than 30% of household <br> income (less than $100K) on monthly <br>selected owner cost/gross rent in <br>the past 12 months, 2019"
+  )
+```
+
+From both graphs, we can see that all regions across the Bay Area experience severe housing affordability issues - from the lowest 33% to the highest 49% of burdened households in the area. As we filter down the data to look into more disadvantaged communities, we are able to see more concentrated ranges. Looking at non-white low income households that have cost burdens for housing, the map shows that they mostly occupy regions around San Francisco and southeast Bay. 
+
+
+# Part II
+In this part, we performed an equity analysis on household income and cost burden. I intentionally separated homeowners and renters, as it is important to look at their differences and analyze housing affordability for different types of housing.
+
+```{r homeowner}
+bay_perc_income_own <-
+  getCensus(
+    name = "acs/acs5",
+    vintage = 2019,
+    region = "county:001,013,041,055,075,081,085,095,097",
+    regionin = "state:06",
+    vars = "group(B25095)"
+  ) %>%
+  select(!c(GEO_ID,state,NAME) & !ends_with(c("EA","MA","M"))) %>%
+  pivot_longer(
+    ends_with("E"),
+    names_to = "name",
+    values_to = "estimate"
+  ) %>%
+  left_join(
+    acs_vars_2019_5yr %>% 
+      select(name, label)
+  ) %>% 
+  select(-name) %>% 
+  separate(
+    label,
+    into = c(NA,NA,"income","own_perc_income"),
+    sep = "!!"
+  ) %>% 
+  filter(!is.na(own_perc_income))
+
+bay_income_total_own <-
+  bay_perc_income_own %>% 
+  group_by(own_perc_income) %>% 
+  summarize(estimate = sum(estimate)) %>% 
+  mutate(income = "Total") %>% 
+  filter(!is.na(own_perc_income))
+```
+
+```{r}
+bay_perc_income_own %>% 
+  group_by(income, own_perc_income) %>% 
+  summarize(estimate = sum(estimate)) %>% 
+  rbind(bay_income_total_own) %>% 
+  ggplot() +
+  geom_bar(
+    aes(
+      x = income %>% factor(levels = rev(c("Total",unique(bay_perc_income_own$income)))),
+      y = estimate,
+      fill = own_perc_income %>% factor(levels = rev(unique(bay_perc_income_own$own_perc_income)))
+    ),
+    stat = "identity",
+    position = "fill"
+  ) +
+  labs(
+    x = "Household income",
+    y = "Share of Households",
+    title = "Bay Area % Household Income spent on Monthly Selected Owner Cost",
+    fill = "Percentage Income on Owned Housing"
+  ) +
+  coord_flip() +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "vertical"
+  )  +
+  guides(
+    fill = guide_legend(
+      reverse = T
+    )
+  )
+```
+
+
+```{r renter}
+bay_perc_income_rent <-
+  getCensus(
+    name = "acs/acs5",
+    vintage = 2019,
+    region = "county:001,013,041,055,075,081,085,095,097",
+    regionin = "state:06",
+    vars = "group(B25074)"
+  ) %>%
+  select(!c(GEO_ID,state,NAME) & !ends_with(c("EA","MA","M"))) %>%
+  pivot_longer(
+    ends_with("E"),
+    names_to = "name",
+    values_to = "estimate"
+  ) %>%
+  left_join(
+    acs_vars_2019_5yr %>% 
+      select(name, label)
+  ) %>% 
+  select(-name) %>% 
+  separate(
+    label,
+    into = c(NA,NA,"income","rent_perc_income"),
+    sep = "!!"
+  ) %>% 
+  filter(!is.na(rent_perc_income))
+
+bay_income_total_rent <-
+  bay_perc_income_rent %>% 
+  group_by(rent_perc_income) %>% 
+  summarize(estimate = sum(estimate)) %>% 
+  mutate(income = "Total") %>% 
+  filter(!is.na(rent_perc_income))
+```
+
+```{r}
+bay_perc_income_rent %>% 
+  group_by(income, rent_perc_income) %>% 
+  summarize(estimate = sum(estimate)) %>% 
+  rbind(bay_income_total_rent) %>% 
+  ggplot() +
+  geom_bar(
+    aes(
+      x = income %>% factor(levels = rev(c("Total",unique(bay_perc_income_rent$income)))),
+      y = estimate,
+      fill = rent_perc_income %>% factor(levels = rev(unique(bay_perc_income_rent$rent_perc_income)))
+    ),
+    stat = "identity",
+    position = "fill"
+  ) +
+  labs(
+    x = "Household income",
+    y = "Share of Households",
+    title = "Bay Area % Household Income spent on Gross Rent",
+    fill = "Percentage Income on Rented Housing"
+  ) +
+  coord_flip() +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "vertical"
+  )  +
+  guides(
+    fill = guide_legend(
+      reverse = T
+    )
+  )
+```
+
+In both graphs, we can see that low and moderate income households are heavily burdened by the region's housing. The vast majority of low income households in the Bay Area experience an excessive housing cost burden, regardless of where they live or whether they are an homeowner. Increasingly, even moderate-income households face excessive cost burdens. 
+
+Looking at the owned housing graph, for example, approximately 45 percent of Bay Area households earning $50,000 to $75,000 per year spent more than 30 percent of their income on their owned housing in 2019. It is only when a household's annual income exceeds $100,000 does the region become marginally more affordable. Just 6 percent of these high-income households are considered excessively burdened, with way more than half of the Bay Area's high-income households spend less than one-fifth of their annual income on housing.
+
+Similar trends can be found in the rented housing graph. However, compared to homeowners, cost burden for housing is higher for renters. This might be because many of the renters have been priced out of the home-buying market by comparatively lower incomes and tighter lending standards, have seen little relief from rising rents and stagnant wages. Also notice the portion of "Not computed" is significantly higher in the renter graph - this is because some of the renters might be living in family/friend owned housing that they can occupy free of charge.
+
+
+# Conclusion
+In this project, we have seen the burdened households in the Bay Area and analyzed the cost burden and household income for both homeowners and renters. While the Bay Area is a very diverse place, it is also home to various inequalities. As reflected in our analysis, housing affordability for low, medium, and high income households vary dramatically. There are also many factors that affect housing affordability - segregation, single-family zoning, and high demand and low supply of housing units are among a few that also reflected existing disparities. Existing policies are limited in solving the problem, and there is an urgent need for action.
+
+
+
+
+
+
+
